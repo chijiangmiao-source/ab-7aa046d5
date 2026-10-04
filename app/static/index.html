@@ -1,0 +1,378 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>飞控共享总线锁 · 优先级继承裁决台</title>
+<style>
+  :root {
+    --bg: #0f1622; --panel: #182234; --panel2: #1e2b41; --line: #2b3b55;
+    --text: #e6edf6; --muted: #93a4bd; --accent: #4da3ff;
+    --ok: #39d98a; --warn: #ffb454; --err: #ff6b6b; --urgent: #ff8a8a;
+  }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--text);
+    font:14px/1.5 -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif; }
+  header { padding:18px 24px; border-bottom:1px solid var(--line);
+    background:linear-gradient(120deg,#142033,#101826); }
+  header h1 { margin:0; font-size:18px; }
+  header p { margin:4px 0 0; color:var(--muted); font-size:12.5px; }
+  main { max-width:1240px; margin:0 auto; padding:20px 24px 60px; }
+  .grid { display:grid; grid-template-columns: 1fr 1fr; gap:16px; }
+  .card { background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:16px; }
+  .card h2 { margin:0 0 10px; font-size:14px; color:var(--accent); }
+  .row { display:flex; gap:8px; align-items:center; margin-bottom:8px; flex-wrap:wrap; }
+  label { color:var(--muted); font-size:12.5px; }
+  input, select { background:var(--panel2); border:1px solid var(--line); color:var(--text);
+    border-radius:6px; padding:5px 8px; font-size:13px; }
+  input[type=text] { min-width:220px; }
+  input.num { width:74px; }
+  input.id  { width:62px; }
+  table { border-collapse:collapse; width:100%; font-size:12.5px; }
+  th, td { padding:4px 8px; border-bottom:1px solid var(--line); text-align:left; white-space:nowrap; }
+  th { color:var(--muted); font-weight:600; }
+  button { background:var(--accent); color:#08131f; border:0; border-radius:6px;
+    padding:7px 14px; font-weight:700; font-size:13px; cursor:pointer; }
+  button.ghost { background:transparent; color:var(--accent); border:1px solid var(--accent); font-weight:500; }
+  button.mini { padding:2px 8px; font-size:11.5px; font-weight:400; background:var(--panel2);
+    color:var(--muted); border:1px solid var(--line); }
+  button:hover { filter:brightness(1.12); }
+  .preset { display:flex; gap:8px; flex-wrap:wrap; margin-bottom:12px; }
+  .actions { display:flex; gap:10px; margin:14px 0; align-items:center; }
+  #status { font-size:13px; }
+  .banner { padding:10px 14px; border-radius:8px; margin:12px 0; font-size:13px; }
+  .banner.ok  { background:rgba(57,217,138,.12); border:1px solid var(--ok); }
+  .banner.err { background:rgba(255,107,107,.12); border:1px solid var(--err); }
+  .banner.warn{ background:rgba(255,180,84,.12); border:1px solid var(--warn); }
+  .step { border:1px solid var(--line); border-radius:8px; margin:10px 0; overflow:hidden; }
+  .step.fail { border-color:var(--err); background:rgba(255,107,107,.06); }
+  .step.init { border-style:dashed; }
+  .step-head { padding:8px 12px; cursor:pointer; display:flex; gap:10px; align-items:center;
+    background:var(--panel2); }
+  .step-head:hover { filter:brightness(1.1); }
+  .idx { color:var(--muted); font-variant-numeric:tabular-nums; }
+  .pill { padding:1px 8px; border-radius:10px; font-size:11.5px; }
+  .pill.acquire { background:#1d3a5f; color:#8ec5ff; }
+  .pill.release { background:#14432f; color:#7ce8b1; }
+  .pill.set-priority { background:#4a3a15; color:#ffcf7d; }
+  .pill.cancel { background:#4a2230; color:#ff9db0; }
+  .pill.invalid, .pill.init { background:#333c4d; color:#a9b6c9; }
+  .step-body { padding:10px 14px; }
+  .snap-grid { display:grid; grid-template-columns: 1fr 1fr; gap:14px; }
+  .inherited { color:var(--urgent); font-size:11.5px; }
+  .eff-boost { color:var(--ok); font-weight:700; }
+  .chain { font-size:12px; color:var(--warn); margin:2px 0; }
+  .frozen { font-size:12px; color:var(--muted); }
+  .muted { color:var(--muted); }
+  .mono { font-variant-numeric:tabular-nums; }
+  @media (max-width: 900px){ .grid,.snap-grid{grid-template-columns:1fr;} }
+</style>
+</head>
+<body>
+<header>
+  <h1>飞控共享总线锁 · 优先级继承裁决台</h1>
+  <p>数值越小越紧急 · 不可重入互斥锁 · 嵌套等待链传递最高紧急度 · 释放/取消后按当前等待图重算 · 同标识重传回放、异内容冲突</p>
+</header>
+<main>
+  <div class="preset">
+    <span class="muted">示例轨迹：</span>
+    <button class="ghost" data-preset="twohop">两跳继承（A→B→C）</button>
+    <button class="ghost" data-preset="fallback">释放后优先级回落</button>
+    <button class="ghost" data-preset="tie">并列移交（同有效优先级取小 id）</button>
+    <button class="ghost" data-preset="invalid">非法事件定位（非拥有者释放）</button>
+  </div>
+
+  <div class="grid">
+    <section class="card">
+      <h2>① 任务基准（至多 16 个）</h2>
+      <table id="taskTable">
+        <thead><tr><th>任务 id</th><th>基准优先级</th><th></th></tr></thead>
+        <tbody></tbody>
+      </table>
+      <div style="margin-top:8px"><button class="mini" id="addTask">＋ 任务</button></div>
+    </section>
+    <section class="card">
+      <h2>② 锁基准（至多 32 把）</h2>
+      <table id="lockTable">
+        <thead><tr><th>锁 id</th><th>基准优先级</th><th></th></tr></thead>
+        <tbody></tbody>
+      </table>
+      <div style="margin-top:8px"><button class="mini" id="addLock">＋ 锁</button></div>
+    </section>
+  </div>
+
+  <section class="card" style="margin-top:16px">
+    <h2>③ 按序事件（至多 128 项）</h2>
+    <table id="eventTable">
+      <thead><tr><th>#</th><th>类型</th><th>任务 id</th><th>锁 id</th><th>优先级</th><th></th></tr></thead>
+      <tbody></tbody>
+    </table>
+    <div style="margin-top:8px"><button class="mini" id="addEvent">＋ 事件</button></div>
+  </section>
+
+  <section class="card" style="margin-top:16px">
+    <div class="row">
+      <label for="auditId">稳定审计标识</label>
+      <input type="text" id="auditId" placeholder="例如 FC-AUDIT-20261004-001" />
+    </div>
+    <div class="actions">
+      <button id="submit">提交并冻结裁决</button>
+      <button class="ghost" id="reread">按标识重新读取</button>
+      <button class="ghost" id="relist">刷新冻结列表</button>
+      <span id="status"></span>
+    </div>
+    <div id="banner"></div>
+  </section>
+
+  <section id="result"></section>
+
+  <section class="card" style="margin-top:16px">
+    <h2>冻结裁决索引</h2>
+    <table id="frozenTable">
+      <thead><tr><th>审计标识</th><th>输入指纹</th><th>冻结时间</th><th>结论</th><th></th></tr></thead>
+      <tbody></tbody>
+    </table>
+  </section>
+</main>
+
+<script>
+const $ = s => document.querySelector(s);
+let tasks = [{id:1,priority:8},{id:2,priority:5},{id:3,priority:1}];
+let locks = [{id:1,priority:9},{id:2,priority:9}];
+let events = [];
+
+/* ---------------- editors ---------------- */
+function renderTasks(){
+  const tb = $('#taskTable tbody'); tb.innerHTML='';
+  tasks.forEach((t,i)=>{
+    const tr=document.createElement('tr');
+    tr.innerHTML=`<td><input class="id num" value="${t.id}"></td>
+      <td><input class="num" value="${t.priority}"></td>
+      <td><button class="mini">删除</button></td>`;
+    tr.querySelectorAll('input')[0].oninput=e=>t.id=parseInt(e.target.value);
+    tr.querySelectorAll('input')[1].oninput=e=>t.priority=parseInt(e.target.value);
+    tr.querySelector('button').onclick=()=>{tasks.splice(i,1);renderTasks();};
+    tb.appendChild(tr);
+  });
+}
+function renderLocks(){
+  const tb = $('#lockTable tbody'); tb.innerHTML='';
+  locks.forEach((l,i)=>{
+    const tr=document.createElement('tr');
+    tr.innerHTML=`<td><input class="id num" value="${l.id}"></td>
+      <td><input class="num" value="${l.priority}"></td>
+      <td><button class="mini">删除</button></td>`;
+    tr.querySelectorAll('input')[0].oninput=e=>l.id=parseInt(e.target.value);
+    tr.querySelectorAll('input')[1].oninput=e=>l.priority=parseInt(e.target.value);
+    tr.querySelector('button').onclick=()=>{locks.splice(i,1);renderLocks();};
+    tb.appendChild(tr);
+  });
+}
+function renderEvents(){
+  const tb = $('#eventTable tbody'); tb.innerHTML='';
+  events.forEach((ev,i)=>{
+    const tr=document.createElement('tr');
+    tr.innerHTML=`<td class="idx">${i+1}</td>
+      <td><select>
+        <option value="acquire">acquire</option>
+        <option value="release">release</option>
+        <option value="set-priority">set-priority</option>
+        <option value="cancel">cancel</option>
+      </select></td>
+      <td><input class="id num" value="${ev.taskId??''}"></td>
+      <td><input class="id num" value="${ev.lockId??''}"></td>
+      <td><input class="num" value="${ev.priority??''}"></td>
+      <td><button class="mini">删除</button></td>`;
+    tr.querySelector('select').value=ev.type;
+    tr.querySelector('select').onchange=e=>ev.type=e.target.value;
+    const ins=tr.querySelectorAll('input');
+    ins[0].oninput=e=>ev.taskId=e.target.value===''?undefined:parseInt(e.target.value);
+    ins[1].oninput=e=>ev.lockId=e.target.value===''?undefined:parseInt(e.target.value);
+    ins[2].oninput=e=>ev.priority=e.target.value===''?undefined:parseInt(e.target.value);
+    tr.querySelector('button').onclick=()=>{events.splice(i,1);renderEvents();};
+    tb.appendChild(tr);
+  });
+}
+$('#addTask').onclick=()=>{tasks.push({id:(tasks.at(-1)?.id||0)+1,priority:5});renderTasks();};
+$('#addLock').onclick=()=>{locks.push({id:(locks.at(-1)?.id||0)+1,priority:5});renderLocks();};
+$('#addEvent').onclick=()=>{events.push({type:'acquire',taskId:undefined,lockId:undefined});renderEvents();};
+
+/* ---------------- presets ---------------- */
+const PRESETS = {
+  twohop: {
+    auditId:'FC-AUDIT-TWOHOP-001',
+    tasks:[{id:1,priority:8},{id:2,priority:5},{id:3,priority:1}],
+    locks:[{id:1,priority:9},{id:2,priority:9}],
+    events:[
+      {type:'acquire',taskId:2,lockId:2},
+      {type:'acquire',taskId:1,lockId:1},
+      {type:'acquire',taskId:2,lockId:1},
+      {type:'acquire',taskId:3,lockId:2},
+      {type:'release',taskId:1,lockId:1},
+      {type:'release',taskId:2,lockId:1},
+      {type:'release',taskId:2,lockId:2}
+    ]
+  },
+  fallback: {
+    auditId:'FC-AUDIT-FALLBACK-001',
+    tasks:[{id:1,priority:8},{id:2,priority:1}],
+    locks:[{id:1,priority:9}],
+    events:[
+      {type:'acquire',taskId:1,lockId:1},
+      {type:'acquire',taskId:2,lockId:1},
+      {type:'release',taskId:1,lockId:1},
+      {type:'release',taskId:2,lockId:1}
+    ]
+  },
+  tie: {
+    auditId:'FC-AUDIT-TIE-001',
+    tasks:[{id:1,priority:4},{id:2,priority:2},{id:3,priority:2}],
+    locks:[{id:1,priority:9}],
+    events:[
+      {type:'acquire',taskId:1,lockId:1},
+      {type:'acquire',taskId:3,lockId:1},
+      {type:'acquire',taskId:2,lockId:1},
+      {type:'release',taskId:1,lockId:1}
+    ]
+  },
+  invalid: {
+    auditId:'FC-AUDIT-INVALID-001',
+    tasks:[{id:1,priority:8},{id:2,priority:5}],
+    locks:[{id:1,priority:9}],
+    events:[
+      {type:'acquire',taskId:1,lockId:1},
+      {type:'release',taskId:2,lockId:1},
+      {type:'set-priority',taskId:1,priority:1}
+    ]
+  }
+};
+document.querySelectorAll('[data-preset]').forEach(btn=>{
+  btn.onclick=()=>{
+    const p=PRESETS[btn.dataset.preset];
+    tasks=structuredClone(p.tasks); locks=structuredClone(p.locks);
+    events=structuredClone(p.events); $('#auditId').value=p.auditId;
+    renderTasks();renderLocks();renderEvents();
+    $('#status').textContent='已载入预设：'+btn.textContent;
+  };
+});
+
+/* ---------------- API ---------------- */
+function payload(){
+  const evs = events.map(e=>{
+    const o={type:e.type,taskId:e.taskId};
+    if(e.lockId!==undefined)o.lockId=e.lockId;
+    if(e.priority!==undefined)o.priority=e.priority;
+    return o;
+  });
+  return {auditId:$('#auditId').value.trim(),
+    tasks:tasks.map(t=>({id:t.id,priority:t.priority})),
+    locks:locks.map(l=>({id:l.id,priority:l.priority})), events:evs};
+}
+async function submitIt(){
+  $('#banner').innerHTML=''; $('#status').textContent='提交中…';
+  try{
+    const res=await fetch('/api/verdicts',{method:'POST',
+      headers:{'Content-Type':'application/json'},body:JSON.stringify(payload())});
+    const data=await res.json();
+    if(res.status===409){
+      $('#status').textContent='冲突 409';
+      banner('warn','⛔ 冲突：审计标识「'+data.auditId+'」已冻结过<b>不同内容</b>的裁决。<br>'+
+        '已存指纹 <span class="mono">'+data.storedHash.slice(0,16)+'…</span>，'+
+        '本次指纹 <span class="mono">'+data.incomingHash.slice(0,16)+'…</span>。可点击“按标识重新读取”回放原裁决。');
+      return;
+    }
+    if(!res.ok){ $('#status').textContent='请求被拒绝 '+res.status;
+      banner('err','❌ '+data.message); return; }
+    $('#status').textContent=data.replayed?'回放成功（相同内容重传）':'首次冻结成功';
+    renderVerdict(data);
+    listFrozen();
+  }catch(err){ $('#status').textContent='网络错误'; banner('err','❌ '+err); }
+}
+async function reread(){
+  const id=$('#auditId').value.trim();
+  if(!id){banner('warn','请先填写审计标识');return;}
+  const res=await fetch('/api/verdicts/'+encodeURIComponent(id));
+  const data=await res.json();
+  if(!res.ok){$('#status').textContent='未找到';banner('err','❌ '+data.message);return;}
+  $('#status').textContent='已重新读取冻结裁决';
+  renderVerdict(data);
+}
+async function listFrozen(){
+  const res=await fetch('/api/verdicts'); const data=await res.json();
+  const tb=$('#frozenTable tbody'); tb.innerHTML='';
+  if(!data.verdicts.length){ tb.innerHTML='<tr><td colspan="5" class="muted">尚无冻结裁决</td></tr>'; return; }
+  data.verdicts.forEach(v=>{
+    const tr=document.createElement('tr');
+    tr.innerHTML=`<td>${v.auditId}</td><td class="mono">${v.inputHash.slice(0,16)}…</td>
+      <td class="mono">${v.createdAt.replace('T',' ').slice(0,19)}</td>
+      <td>${v.accepted?'<span style="color:var(--ok)">有效裁决</span>':
+        '<span style="color:var(--err)">第 '+v.errorIndex+' 项事件非法</span>'}</td>
+      <td><button class="mini">读取</button></td>`;
+    tr.querySelector('button').onclick=()=>{$('#auditId').value=v.auditId;reread();};
+    tb.appendChild(tr);
+  });
+}
+$('#submit').onclick=submitIt; $('#reread').onclick=reread; $('#relist').onclick=listFrozen;
+
+/* ---------------- rendering ---------------- */
+function banner(kind, html){ $('#banner').innerHTML=`<div class="banner ${kind}">${html}</div>`; }
+
+function snapHtml(snap){
+  if(!snap) return '<div class="muted">裁决在此冻结，无后续快照（本次提交的旧成功全部作废）。</div>';
+  const tasks=snap.tasks.map(t=>{
+    const boost = t.effectivePriority<t.basePriority;
+    const state = t.state==='waiting'
+      ? '<span style="color:var(--warn)">等待锁 '+t.waitingFor+'</span>'
+      : (t.holdingLocks.length?'<span style="color:var(--ok)">运行 · 持锁 '+t.holdingLocks.join(',')+'</span>'
+                            :'<span class="muted">运行 · 未持锁</span>');
+    const inh = t.inheritedFrom.length
+      ? '<div class="inherited">继承自等待者 ['+t.inheritedFrom.join(', ')+']</div>':'';
+    return `<tr><td>${t.id}</td><td>${t.basePriority}</td>
+      <td class="${boost?'eff-boost':'mono'}">${t.effectivePriority}</td><td>${state}</td><td>${inh}</td></tr>`;
+  }).join('');
+  const locks=snap.locks.map(l=>`<tr><td>${l.id}</td><td>${l.basePriority}</td>
+    <td>${l.holder===null?'<span class="muted">—</span>':l.holder}</td>
+    <td>${l.waiters.length?'['+l.waiters.join(', ')+']':'<span class="muted">空</span>'}</td></tr>`).join('');
+  const chains=(snap.chains||[]).map(c=>'<div class="chain">紧急度传递链：'+c.join(' → ')+
+    '（等待者→持有者…）</div>').join('');
+  return `<div class="snap-grid">
+    <div><b class="muted">任务快照</b>
+      <table><thead><tr><th>id</th><th>基准</th><th>有效优先级</th><th>运行/等待/持锁</th><th></th></tr></thead>
+      <tbody>${tasks}</tbody></table></div>
+    <div><b class="muted">锁快照</b>${chains}
+      <table><thead><tr><th>id</th><th>基准</th><th>持有者</th><th>等待队列</th></tr></thead>
+      <tbody>${locks}</tbody></table></div></div>`;
+}
+function renderVerdict(rec){
+  const v=rec.verdict;
+  let head;
+  if(v.accepted){
+    head=`<div class="banner ok">✅ <b>裁决有效</b>：${v.steps.length-1} 项事件全部成功执行。
+      <span class="frozen">输入指纹 <span class="mono">${rec.inputHash.slice(0,20)}…</span> ·
+      ${rec.replayed?'相同内容重传，回放冻结结论':'已于 '+rec.createdAt+' 冻结'}</span></div>`;
+  }else{
+    head=`<div class="banner err">⛔ <b>第 ${v.errorIndex} 项事件非法，裁决冻结</b>：${v.error}<br>
+      <span class="frozen">按规则定位该事件并清除本次提交此前所有旧成功；之后不再执行。
+      输入指纹 <span class="mono">${rec.inputHash.slice(0,20)}…</span></span></div>`;
+  }
+  const steps=v.steps.map(s=>{
+    const ev = s.raw?JSON.stringify(s.raw):'';
+    return `<div class="step ${s.ok?'':'fail'} ${s.type==='init'?'init':''}">
+      <div class="step-head" onclick="this.nextElementSibling.style.display=
+        this.nextElementSibling.style.display==='none'?'block':'none'">
+        <span class="idx">#${s.index}</span>
+        <span class="pill ${s.type}">${s.type}</span>
+        <span>${s.detail}</span>
+        <span class="muted mono" style="margin-left:auto">${ev.replace(/"/g,'&quot;')}</span>
+      </div>
+      <div class="step-body">${snapHtml(s.snapshot)}</div></div>`;
+  }).join('');
+  $('#result').innerHTML = head + `<section class="card" style="margin-top:12px">
+    <h2>逐步快照（点击每步可折叠）</h2>${steps}</section>`;
+}
+
+/* ---------------- boot ---------------- */
+renderTasks();renderLocks();renderEvents();listFrozen();
+</script>
+</body>
+</html>

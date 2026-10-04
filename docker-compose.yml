@@ -1,0 +1,40 @@
+services:
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: fc-lock-arbiter:latest
+    environment:
+      PORT: "8080"
+      HOST: "0.0.0.0"
+      DATA_FILE: /data/verdicts.json
+    ports:
+      # Configurable host port: HOST_PORT=9090 docker compose up
+      - "${HOST_PORT:-8080}:8080"
+    volumes:
+      - verdict-data:/data
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import json,urllib.request,sys; r=urllib.request.urlopen('http://web:8080/health',timeout=3); sys.exit(0 if json.load(r).get('status')=='ok' else 1)"]
+      interval: 5s
+      timeout: 3s
+      retries: 6
+      start_period: 3s
+    restart: unless-stopped
+
+  verify:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: fc-lock-arbiter:latest
+    depends_on:
+      web:
+        condition: service_healthy
+    environment:
+      WEB_BASE_URL: "http://web:8080"
+    # Runs rule tests + build checks + API/HTTP smoke against the live web
+    # container, then exits; its exit code is the verification verdict.
+    command: ["python3", "verify/run_verify.py"]
+    restart: "no"
+
+volumes:
+  verdict-data:
