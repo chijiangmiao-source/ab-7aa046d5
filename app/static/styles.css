@@ -1,0 +1,126 @@
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  background: #0e1420;
+  color: #dce4f0;
+}
+header {
+  padding: 20px 28px;
+  background: linear-gradient(120deg, #16233b, #101827);
+  border-bottom: 1px solid #24304a;
+}
+header h1 { margin: 0 0 6px; font-size: 20px; }
+.sub { margin: 0; color: #8ea0bd; font-size: 13px; }
+main { padding: 20px 28px 60px; max-width: 1200px; margin: 0 auto; }
+.panel {
+  background: #131c2e;
+  border: 1px solid #24304a;
+  border-radius: 10px;
+  padding: 18px 22px;
+  margin-bottom: 22px;
+}
+h2 { font-size: 15px; color: #aebfe0; margin: 14px 0 10px; }
+h2 .mini { margin-left: 10px; }
+.row { display: flex; align-items: flex-end; gap: 20px; flex-wrap: wrap; }
+.row label { display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: #9db0cf; }
+input, select {
+  background: #0c1322;
+  border: 1px solid #2c3a57;
+  color: #e6edf8;
+  border-radius: 6px;
+  padding: 7px 10px;
+  font-size: 13px;
+}
+input[type="text"] { min-width: 220px; }
+input[type="number"] { width: 110px; }
+input:focus, select:focus { outline: none; border-color: #4d7cff; }
+.presets { display: flex; gap: 8px; flex-wrap: wrap; }
+.grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
+@media (max-width: 900px) { .grid2 { grid-template-columns: 1fr; } }
+table { border-collapse: collapse; width: 100%; font-size: 13px; }
+th, td { text-align: left; padding: 5px 8px; border-bottom: 1px solid #1e2a42; }
+th { color: #7f92b2; font-weight: 600; }
+td input, td select { width: 100%; padding: 5px 8px; }
+button {
+  background: #233150;
+  border: 1px solid #33446a;
+  color: #dce6fa;
+  border-radius: 6px;
+  padding: 7px 14px;
+  font-size: 13px;
+  cursor: pointer;
+}
+button:hover { background: #2c3e64; }
+button.primary { background: #2f5fd0; border-color: #3f6fe0; }
+button.primary:hover { background: #3a6de0; }
+button.mini { padding: 2px 10px; font-size: 12px; }
+button.danger { background: #4a2230; border-color: #6b2f42; }
+.actions { margin-top: 16px; display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+.status { font-size: 13px; color: #9db0cf; }
+.status.ok { color: #5ed08a; }
+.status.rejected { color: #ff7a8a; }
+.status.conflict { color: #ffb84d; }
+.errorbox {
+  margin-top: 14px;
+  padding: 12px 14px;
+  background: #3a1620;
+  border: 1px solid #6b2f42;
+  border-radius: 8px;
+  color: #ffb3bf;
+  font-size: 13px;
+}
+.step {
+  border: 1px solid #223049;
+  border-radius: 8px;
+  margin: 10px 0;
+  overflow: hidden;
+}
+.step > summary {
+  cursor: pointer;
+  padding: 9px 14px;
+  background: #17233a;
+  font-size: 13px;
+  list-style: none;
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}
+.step > summary::-webkit-details-marker { display: none; }
+.step .tag {
+  font-size: 11px;
+  padding: 1px 8px;
+  border-radius: 10px;
+  background: #2a3c60;
+  color: #b9cdf5;
+}
+.step .tag.acquire { background: #1f3d2c; color: #8ee6b0; }
+.step .tag.release { background: #3d341f; color: #f0d18e; }
+.step .tag.set-priority { background: #2c2f5a; color: #b6bdff; }
+.step .tag.cancel { background: #4a2230; color: #ffb3bf; }
+.step .tag.initial { background: #24304a; color: #aebfe0; }
+.step .note { color: #c6d4ee; }
+.stepBody { padding: 10px 14px 14px; display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 14px; }
+@media (max-width: 1000px) { .stepBody { grid-template-columns: 1fr; } }
+.stepBody h3 { margin: 0 0 6px; font-size: 12px; color: #7f92b2; }
+.chip {
+  display: inline-block;
+  margin: 2px 4px 2px 0;
+  padding: 2px 9px;
+  border-radius: 12px;
+  background: #0e1728;
+  border: 1px solid #29374f;
+  font-size: 12px;
+}
+.chip b { color: #ffffff; }
+.chip .eff { color: #5ed08a; }
+.chip .base { color: #8ea0bd; }
+.chip.waiting { border-color: #6b4a2f; }
+.chip.waiting .eff { color: #ffb84d; }
+.meta-line { font-size: 13px; margin: 6px 0; }
+.badge-true { color: #5ed08a; font-weight: 600; }
+.badge-false { color: #ff7a8a; font-weight: 600; }
+.lockblock { margin-bottom: 8px; font-size: 12px; }
+.lockblock .owner { color: #8ee6b0; }
+.lockblock .free { color: #7f92b2; }
+.waiters { color: #ffb84d; }

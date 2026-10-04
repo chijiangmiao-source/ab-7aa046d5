@@ -1,0 +1,36 @@
+services:
+  app:
+    build: ./app
+    image: lock-audit-app
+    environment:
+      PORT: "8080"
+      AUDIT_DB: /data/verdicts.db
+    ports:
+      # host port is configurable: HOST_PORT=9090 docker compose up -d
+      - "${HOST_PORT:-8080}:8080"
+    volumes:
+      - audit-data:/data
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/api/health', timeout=3)"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+
+  verify:
+    build: ./app
+    image: lock-audit-app
+    depends_on:
+      app:
+        condition: service_healthy
+    environment:
+      SERVICE_URL: http://app:8080
+    working_dir: /srv
+    entrypoint: ["bash", "/srv/verify.sh"]
+    # runs the rule tests + build checks + API/HTTP smoke, then exits;
+    # its status code is the verification result:
+    #   docker compose up --build verify; docker inspect ... .State.ExitCode
+    restart: "no"
+
+volumes:
+  audit-data:

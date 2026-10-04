@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>飞控共享总线锁 · 优先级继承审计</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <header>
+    <h1>飞控共享总线锁 · 优先级继承审计</h1>
+    <p class="sub">
+      数值越小越紧急 · 不可重入互斥锁 · 嵌套等待链传递最高紧急度 ·
+      释放/取消后重算并按「有效优先级最高、任务标识最小」移交
+    </p>
+  </header>
+
+  <main>
+    <section class="panel" id="editor">
+      <div class="row">
+        <label>稳定审计标识
+          <input id="auditId" type="text" placeholder="例如: FC-TRAJ-2026-001" />
+        </label>
+        <div class="presets">
+          <button data-preset="twohop" type="button">载入：两跳继承</button>
+          <button data-preset="rollback" type="button">载入：释放回落</button>
+          <button data-preset="tie" type="button">载入：并列移交</button>
+        </div>
+      </div>
+
+      <div class="grid2">
+        <div>
+          <h2>任务（至多 16，基准优先级）
+            <button id="addTask" type="button" class="mini">＋任务</button>
+          </h2>
+          <table id="taskTable">
+            <thead><tr><th>任务标识</th><th>基准优先级</th><th></th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+        <div>
+          <h2>锁（至多 32）
+            <button id="addLock" type="button" class="mini">＋锁</button>
+          </h2>
+          <table id="lockTable">
+            <thead><tr><th>锁标识</th><th></th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+
+      <h2>事件序列（按序，至多 128 项）
+        <button id="addEvent" type="button" class="mini">＋事件</button>
+      </h2>
+      <table id="eventTable">
+        <thead>
+          <tr><th>#</th><th>类型</th><th>任务</th><th>锁 / 新优先级</th><th></th></tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+
+      <div class="actions">
+        <button id="submit" type="button" class="primary">提交审计（冻结裁决）</button>
+        <button id="reread" type="button">按标识重新读取冻结裁决</button>
+        <span id="status" class="status"></span>
+      </div>
+      <div id="errorbox" class="errorbox" hidden></div>
+    </section>
+
+    <section class="panel" id="result" hidden>
+      <h2>裁决与逐步快照</h2>
+      <div id="verdictMeta"></div>
+      <div id="steps"></div>
+    </section>
+  </main>
+
+  <script src="app.js"></script>
+</body>
+</html>
